@@ -1,5 +1,5 @@
 # email-forwarder
-Terraform を使って、AWS 上に Email の受信・転送・Slack通知を実行するための環境を AWS に作成するためのプロダクトです。
+Terraform を使って、AWS 上に Email の受信・転送・Slack通知を実行するための環境を作成するためのプロダクトです。
 
 ## 機能
 - SES でのメール受信と S3 へのメール保存
@@ -7,7 +7,7 @@ Terraform を使って、AWS 上に Email の受信・転送・Slack通知を実
 - ついでに Slack に投稿
 - ついでに受信したメールが ACM の apploval メールだったら勝手に承認
 
-SESレシーブルールの作成も、R53の設定も、Lambda の作成も terraform apply だけで完結します。
+SESメール受信ルールの作成も、R53の設定も、Lambda の作成も terraform apply だけで完結します。
 手作業でやらなくてはいけないのは、SES の送信Eメールの登録・承認と Slack の incomming web hook の作成だけ。
 
 新規で取得したドメインでメール受信の設定とかするのめんどくさかったんだけど、これ使えば既存のメールアドレスに受信したメールを転送してくれるようになるので、いきなり楽チンになります。
@@ -29,7 +29,8 @@ SES の送信Eメールの登録・承認は、手動で行っておく必要が
 作成した送信Eメールは `${var.email_from}` にセットしてください。
 
 ### ACM の自動承認について
-一応、Approval メール本文内のアカウントIDと Lambda が実行されている AWS Account ID を比較して同じだったら自動承認するようにしています。
+Approval メール本文内のAWSアカウントIDと Lambda が実行されているAWSアカウントIDを比較して同じだったら自動承認するようにしています。
+別のAWSアカウントから、ACMリクエストしても自動承認されません。
 
 ## apply
 
@@ -59,7 +60,7 @@ SES を使ってメール転送するときの From として使用するメー�
 転送先のメールアドレスです。
 
 #### slack_path, slack_channel, slack_user_name, slack_icon_emoji
-Slack incoming Webhook ようの情報です。
+Slack incoming Webhook 用の情報です。
 
 #### ses_receipt_rule_position
 SES 受信ルールの default-rule-set に受信ルールを追加するので、すでに受信ルールが登録されている場合は最後の数字+1を設定してください。
