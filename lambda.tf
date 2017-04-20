@@ -17,12 +17,13 @@ resource "aws_lambda_function" "email_forwarder" {
 
     environment {
         variables = {
-            FROM_EMAIL    = "${var.email_from}",
-            TO_SUFFIX     = "${var.email_to}",
-            SLACK_PATH    = "${var.slack_path}",
-            SLACK_CHANNEL = "${var.slack_channel}",
-            SLACK_USER    = "${var.slack_user_name}",
-            SLACK_ICON    = "${var.slack_icon_emoji}",
+            AWS_ACCOUNT_ID  = "${data.aws_caller_identity.current.account_id}",
+            FROM_EMAIL      = "${var.email_from}",
+            TO_SUFFIX       = "${var.email_to}",
+            SLACK_PATH      = "${var.slack_path}",
+            SLACK_CHANNEL   = "${var.slack_channel}",
+            SLACK_USER      = "${var.slack_user_name}",
+            SLACK_ICON      = "${var.slack_icon_emoji}",
         }
     }
 }

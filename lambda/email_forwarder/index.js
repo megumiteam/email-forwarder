@@ -20,6 +20,8 @@ exports.handler = function(event, context) {
     const aws = require('aws-sdk');
     const async = require('async');
     const cheerio = require('cheerio');
+    const https = require('https');
+    const util = require('util');
 
     const bucket = event.Records[0].s3.bucket.name;
     const key = event.Records[0].s3.object.key;
@@ -35,20 +37,19 @@ exports.handler = function(event, context) {
             // parsing email
             let MailParser = require('mailparser').MailParser;
             let mailparser = new MailParser();
-            let mailRaw = data.Body.toString();
 
             // setup an event listener when the parsing finishes
-            mailparser.on('end', function(result){
+            mailparser.on('end', (result) => {
                 mailObject = result;
                 console.log('Receive Mail: %j', mailObject);    // eslint-disable-line
                 nextProcess(null, {
                     Object: result,
-                    Raw: mailRaw
+                    Raw: data.Body.toString()
                 });
             });
 
             // send the email source to the parser
-            mailparser.write(mailRaw);
+            mailparser.write(data.Body.toString());
             mailparser.end();
         },
         function(email, nextProcess) {
@@ -81,7 +82,7 @@ exports.handler = function(event, context) {
             let match = email.Data.match(/^((?:.+\r?\n)*)(\r?\n(?:.*\s+)*)/m);
             let header = match && match[1] ? match[1] : email.Data;
             let body = match && match[2] ? match[2] : '';
-            let from = email.Object && email.Object.from && email.Object.from[0] ? email.Object.from[0].address : '';
+            let from = email.Object.from && email.Object.from[0] ? email.Object.from[0].address : '';
 
             // Add "Reply-To:" with the "From" address if it doesn't already exists
             if (!/^Reply-To:\s/m.test(header)) {
@@ -138,9 +139,6 @@ exports.handler = function(event, context) {
         function(result, nextProcess) {
             // post to slack
             if (config.slack.path) {
-                let https = require('https');
-                let util = require('util');
-    
                 let params = {
                     method:     'POST',
                     hostname:   config.slack.hostname,
@@ -161,11 +159,11 @@ exports.handler = function(event, context) {
                     'text':     mailObject.text
                 }];
     
-                let req = https.request(params, function(res) {
+                let req = https.request(params, (res) => {
                     nextProcess(null, res);
                 });
-                req.on('error', function(err) {
-                    console.log('problem with request: ' + err.message);    // eslint-disable-line
+                req.on('error', (err) => {
+                    console.log('problem with request (Slack): ' + err.message);    // eslint-disable-line
                     nextProcess(err);
                 });
                 req.write(util.format('%j', postData));
@@ -179,30 +177,28 @@ exports.handler = function(event, context) {
             let from = mailObject && mailObject.from ? mailObject.from : [{address: '', 'name': ''}],
                 to = mailObject && mailObject.to ? mailObject.to : [{address: '', 'name': ''}],
                 subject = mailObject && mailObject.subject ? mailObject.subject : '';
+            let mailInfo = {
+                from: from,
+                to: to,
+                subject: subject
+            };
             if (from[0].address === 'no-reply@certificates.amazon.com' && /^administrator/.test(to[0].address) && /^Certificate approval/.test(subject)) {
                 let $ = cheerio.load(mailObject.html);
                 let approvalUrl = $('a#approval_url').attr('href');
-                nextProcess(null, {
-                    from: from,
-                    to: to,
-                    subject: subject,
-                    ACMApprovalUrl: approvalUrl
-                });
-            } else {
-                nextProcess(null, {
-                    from: from,
-                    to: to,
-                    subject: subject
-                });
+                let aws_account_id = process.env.AWS_ACCOUNT_ID;
+                let regexp = new RegExp(aws_account_id.replace(/(\d{4})(\d{4})(\d{4})/,'$1-$2-$3'));
+                if ($('td').text().match(regexp)) {
+                    mailInfo.ACMApprovalUrl = approvalUrl;
+                }
             }
+            nextProcess(null, mailInfo);
         },
         function(result, nextProcess) {
             if (result.ACMApprovalUrl) {
-                // ACM Approval
-                let https = require('https');
+                // Get ACM Approval Form
                 let body;
                 console.log('ACM Approval Url: %j', result.ACMApprovalUrl);    // eslint-disable-line
-                https.get(result.ACMApprovalUrl, function(res){
+                https.get(result.ACMApprovalUrl, (res) => {
                     res.on('data', (chunk) => {
                         body += chunk;
                     });
@@ -213,7 +209,7 @@ exports.handler = function(event, context) {
                             response: res
                         });
                     });
-                }).on('error', function(err){
+                }).on('error', (err) => {
                     nextProcess(err);
                 });
             } else {
@@ -222,28 +218,40 @@ exports.handler = function(event, context) {
         },
         function(result, nextProcess) {
             if (result.ACMApprovalBody) {
-                let request = require('request');
-                let url = require('url');
+                // ACM Approval
                 let $ = cheerio.load(result.ACMApprovalBody);
+                let url = require('url');
                 let u = url.parse(result.ACMApprovalUrl, false);
-                let action = u.protocol + '//' + u.host + $('form').attr('action');
+                let params = {
+                    method:     'POST',
+                    hostname:   u.host,
+                    port:       443,
+                    path:       $('form').attr('action')
+                };
 
-                let form = {};
+                let postData = {};
                 async.eachSeries($('form').serializeArray(),
                     function(input, nextLoop){
-                        form[input.name] = input.value;
+                        postData[input.name] = input.value;
                         nextLoop();
                     },
-                    function complete(err) {
-                        if (err) nextProcess(err);
+                    (err) => {
+                        if (err) {
+                            nextProcess(err);
+                        } else {
+                            console.log('Approval post data: %j', postData);    // eslint-disable-line
+                            let req = https.request(params, (res) => {
+                                nextProcess(null, res);
+                            });
+                            req.on('error', (err) => {
+                                console.log('problem with request (ACM Approval): ' + err.message);    // eslint-disable-line
+                                nextProcess(err);
+                            });
+                            req.write(util.format('%j', postData));
+                            req.end();
+                        }
                     }
                 );
-
-                console.log('action: %j', action);    // eslint-disable-line
-                console.log('form: %j', form);    // eslint-disable-line
-                request.post(action, {form: form}, (err, res, body) => {
-                    nextProcess(err, {res: res, body: body});
-                });
             } else {
                 nextProcess(null, result);
             }
@@ -251,7 +259,7 @@ exports.handler = function(event, context) {
         (err, res) => {
             if (err) {
                 console.log('err: %j', err);    // eslint-disable-line
-                context.done(null, err);
+                context.fail(err);
             } else {
                 console.log('result: %j', res); // eslint-disable-line
                 context.succeed('Success!');
