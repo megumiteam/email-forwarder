@@ -5,6 +5,7 @@ Name: Email Forwarder
 
 exports.handler = function(event, context) {
     const config = {
+        awsAccountID:   process.env.AWS_ACCOUNT_ID,
         fromEmail:      process.env.FROM_EMAIL,
         toEmailSuffix:  process.env.TO_SUFFIX,
         slack: {
@@ -185,8 +186,7 @@ exports.handler = function(event, context) {
             if (from[0].address === 'no-reply@certificates.amazon.com' && /^administrator/.test(to[0].address) && /^Certificate approval/.test(subject)) {
                 let $ = cheerio.load(mailObject.html);
                 let approvalUrl = $('a#approval_url').attr('href');
-                let aws_account_id = process.env.AWS_ACCOUNT_ID;
-                let regexp = new RegExp(aws_account_id.replace(/(\d{4})(\d{4})(\d{4})/,'$1-$2-$3'));
+                let regexp = new RegExp(config.awsAccountID.replace(/(\d{4})(\d{4})(\d{4})/,'$1-$2-$3'));
                 if ($('td').text().match(regexp)) {
                     mailInfo.ACMApprovalUrl = approvalUrl;
                 }
@@ -194,6 +194,7 @@ exports.handler = function(event, context) {
             nextProcess(null, mailInfo);
         },
         function(result, nextProcess) {
+            let mailInfo = result;
             if (result.ACMApprovalUrl) {
                 // Get ACM Approval Form
                 let body;
@@ -203,20 +204,19 @@ exports.handler = function(event, context) {
                         body += chunk;
                     });
                     res.on('end', (res) => {
-                        nextProcess(null, {
-                            ACMApprovalUrl: result.ACMApprovalUrl,
-                            ACMApprovalBody: body,
-                            response: res
-                        });
+                        mailInfo.ACMApprovalBody = body;
+                        mailInfo.response        = res;
+                        nextProcess(null, mailInfo);
                     });
                 }).on('error', (err) => {
-                    nextProcess(err);
+                    nextProcess(err, mailInfo);
                 });
             } else {
-                nextProcess(null, result);
+                nextProcess(null, mailInfo);
             }
         },
         function(result, nextProcess) {
+            let mailInfo = result;
             if (result.ACMApprovalBody) {
                 // ACM Approval
                 let $ = cheerio.load(result.ACMApprovalBody);
@@ -237,15 +237,18 @@ exports.handler = function(event, context) {
                     },
                     (err) => {
                         if (err) {
-                            nextProcess(err);
+                            nextProcess(err, mailInfo);
                         } else {
                             console.log('Approval post data: %j', postData);    // eslint-disable-line
+                            mailInfo.postParams      = params;
+                            mailInfo.postData        = postData;
                             let req = https.request(params, (res) => {
-                                nextProcess(null, res);
+                                mailInfo.response        = res;
+                                nextProcess(null, mailInfo);
                             });
                             req.on('error', (err) => {
                                 console.log('problem with request (ACM Approval): ' + err.message);    // eslint-disable-line
-                                nextProcess(err);
+                                nextProcess(err, mailInfo);
                             });
                             req.write(util.format('%j', postData));
                             req.end();
@@ -253,15 +256,15 @@ exports.handler = function(event, context) {
                     }
                 );
             } else {
-                nextProcess(null, result);
+                nextProcess(null, mailInfo);
             }
         }],
         (err, res) => {
+            console.log('result: %j', res); // eslint-disable-line
             if (err) {
                 console.log('err: %j', err);    // eslint-disable-line
                 context.fail(err);
             } else {
-                console.log('result: %j', res); // eslint-disable-line
                 context.succeed('Success!');
             }
         }
