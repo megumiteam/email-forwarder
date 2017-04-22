@@ -1,5 +1,5 @@
 resource "aws_iam_role" "iam_for_lambda" {
-  name = "iam_for_email_forwarder"
+  name = "iam_for_email_forwarder-${var.region}-${var.domain}"
 
   assume_role_policy = <<EOF
 {
@@ -58,7 +58,7 @@ resource "aws_iam_role_policy_attachment" "s3_mails_read" {
 }
 
 resource "aws_iam_policy" "send_email" {
-    name        = "SESSendMail-${var.region}"
+    name        = "SESSendMail-${var.region}-${var.domain}"
     description = ""
     policy      = <<POLICY
 {

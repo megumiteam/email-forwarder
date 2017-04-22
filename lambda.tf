@@ -8,7 +8,7 @@ resource "aws_lambda_permission" "allow_bucket" {
 
 resource "aws_lambda_function" "email_forwarder" {
     filename         = "lambda/email_forwarder.zip"
-    function_name    = "email_forwarder"
+    function_name    = "email_forwarder-${var.region}-${replace(var.domain,".","_")}"
     role             = "${aws_iam_role.iam_for_lambda.arn}"
     handler          = "index.handler"
     source_code_hash = "${base64sha256(file("lambda/email_forwarder.zip"))}"
